@@ -79,12 +79,83 @@ class _Response(object):
 
         self._response['card'] = card
         return self
+    
+    def list_display_render(self, template=None, title=None, backButton='HIDDEN', token=None, background_image_url=None, image=None, listItems=None, hintText=None):
+        directive = [
+            {
+                'type': 'Display.RenderTemplate',
+                'template': {
+                    'type': template,
+                    'backButton': backButton,
+                    'backgroundImage': {
+                        'sources': [
+                            {'url': background_image_url}
+                        ]
+                    },
+                    'title': title,
+                    'listItems': listItems
+                }
+            }
+        ]
+
+        if hintText is not None:
+            hint = {
+                'type':'Hint',
+                'hint': {
+                    'type':"PlainText",
+                    'text': hintText
+                }
+            }
+            directive.append(hint)
+        self._response['directives'] = directive
+        return self
+
+    def display_render(self, template=None, title=None, backButton='HIDDEN', token=None, background_image_url=None, image=None, text=None, hintText=None):
+        directive = [
+            {
+                'type': 'Display.RenderTemplate',
+                'template': {
+                    'type': template,
+                    'backButton': backButton,
+                    'backgroundImage': {
+                        'sources': [
+                            {'url': background_image_url}
+                            ]
+                    },
+                    'title': title,
+                    'textContent': text
+                }
+            }
+        ]
+        
+        if image is not None:
+            directive[0]['template']['image'] = {
+                'sources': [
+                    {'url': image}
+                ]
+            }
+            
+        if token is not None:
+            directive['template']['token'] = token
+            
+        if hintText is not None:
+            hint = {
+                'type':'Hint',
+                'hint': {
+                    'type':"PlainText",
+                    'text': hintText
+                }
+            }
+            directive.append(hint)
+
+        self._response['directives'] = directive
+        return self
 
     def link_account_card(self):
         card = {'type': 'LinkAccount'}
         self._response['card'] = card
         return self
-        
+
     def consent_card(self, permissions):
         card = {
             'type': 'AskForPermissionsConsent',
@@ -99,6 +170,7 @@ class _Response(object):
             'response': self._response,
             'sessionAttributes': session.attributes
         }
+        
         kw = {}
         if hasattr(session, 'attributes_encoder'):
             json_encoder = session.attributes_encoder
@@ -128,6 +200,15 @@ class question(_Response):
         return self
 
 
+class delegate(_Response):
+
+    def __init__(self, speech):
+        self._response = {
+            'shouldEndSession': False,
+            'directives': [{'type': 'Dialog.Delegate'}]
+        }
+
+
 class audio(_Response):
     """Returns a response object with an Amazon AudioPlayer Directive.
 
@@ -154,30 +235,33 @@ class audio(_Response):
             self._response = {}
         self._response['directives'] = []
 
-    def play(self, stream_url, offset=0):
+    def play(self, stream_url, offset=0, opaque_token=None):
         """Sends a Play Directive to begin playback and replace current and enqueued streams."""
 
         self._response['shouldEndSession'] = True
         directive = self._play_directive('REPLACE_ALL')
-        directive['audioItem'] = self._audio_item(stream_url=stream_url, offset=offset)
+        directive['audioItem'] = self._audio_item(stream_url=stream_url, offset=offset, opaque_token=opaque_token)
         self._response['directives'].append(directive)
         return self
 
-    def enqueue(self, stream_url, offset=0):
+    def enqueue(self, stream_url, offset=0, opaque_token=None):
         """Adds stream to the queue. Does not impact the currently playing stream."""
         directive = self._play_directive('ENQUEUE')
-        audio_item = self._audio_item(stream_url=stream_url, offset=offset, push_buffer=False)
+        audio_item = self._audio_item(stream_url=stream_url,
+                                      offset=offset,
+                                      push_buffer=False,
+                                      opaque_token=opaque_token)
         audio_item['stream']['expectedPreviousToken'] = current_stream.token
 
         directive['audioItem'] = audio_item
         self._response['directives'].append(directive)
         return self
 
-    def play_next(self, stream_url=None, offset=0):
+    def play_next(self, stream_url=None, offset=0, opaque_token=None):
         """Replace all streams in the queue but does not impact the currently playing stream."""
 
         directive = self._play_directive('REPLACE_ENQUEUED')
-        directive['audioItem'] = self._audio_item(stream_url=stream_url, offset=offset)
+        directive['audioItem'] = self._audio_item(stream_url=stream_url, offset=offset, opaque_token=opaque_token)
         self._response['directives'].append(directive)
         return self
 
@@ -194,7 +278,7 @@ class audio(_Response):
         directive['playBehavior'] = behavior
         return directive
 
-    def _audio_item(self, stream_url=None, offset=0, push_buffer=True):
+    def _audio_item(self, stream_url=None, offset=0, push_buffer=True, opaque_token=None):
         """Builds an AudioPlayer Directive's audioItem and updates current_stream"""
         audio_item = {'stream': {}}
         stream = audio_item['stream']
@@ -209,7 +293,7 @@ class audio(_Response):
         # new stream
         else:
             stream['url'] = stream_url
-            stream['token'] = str(uuid.uuid4())
+            stream['token'] = opaque_token or str(uuid.uuid4())
             stream['offsetInMilliseconds'] = offset
 
         if push_buffer:  # prevents enqueued streams from becoming current_stream
